@@ -21,6 +21,9 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 
+# Local OAuth credentials (copy from GoogleOAuthSecrets.example.plist)
+LilAgents/GoogleOAuthSecrets.plist
+
 # Sparkle
 *.dmg
 *.zip

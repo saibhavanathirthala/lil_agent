@@ -9,8 +9,8 @@ class LilAgentsController {
     private var isHiddenForEnvironment = false
 
     func start() {
-        let char1 = WalkerCharacter(videoName: "walk-bruce-01", name: "Bruce")
-        let char2 = WalkerCharacter(videoName: "walk-jazz-01", name: "Jazz")
+        let char1 = WalkerCharacter(videoName: "walk-bruce-01", name: "Bruce", role: .claude)
+        let char2 = WalkerCharacter(videoName: "walk-jazz-01", name: "Jazz", role: .reminders)
 
         char1.accelStart = 3.0
         char1.fullSpeedStart = 3.75

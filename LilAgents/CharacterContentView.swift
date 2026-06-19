@@ -8,6 +8,23 @@ class KeyableWindow: NSWindow {
 class CharacterContentView: NSView {
     weak var character: WalkerCharacter?
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]
+        addTrackingArea(NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        character?.showNameBadgeOnHover()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        character?.hideNameBadgeOnHover()
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         let localPoint = convert(point, from: superview)
         guard bounds.contains(localPoint) else { return nil }

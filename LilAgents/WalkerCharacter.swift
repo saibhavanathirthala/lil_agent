@@ -22,6 +22,7 @@ enum CharacterSize: String, CaseIterable {
 class WalkerCharacter {
     let videoName: String
     let name: String
+    let role: CharacterRole
     var size: CharacterSize {
         get {
             let raw = UserDefaults.standard.string(forKey: "\(name)Size") ?? "big"
@@ -83,15 +84,50 @@ class WalkerCharacter {
     var themeOverride: PopoverTheme?
     var isAgentBusy: Bool { session?.isBusy ?? false }
     var thinkingBubbleWindow: NSWindow?
+    var nameBadgeWindow: NSWindow?
+    var reminderManager: ReminderManager?
+    var reminderView: ReminderView?
+    var calendarAlertManager: CalendarAlertManager?
     private(set) var isManuallyVisible = true
     private var environmentHiddenAt: CFTimeInterval?
     private var wasPopoverVisibleBeforeEnvironmentHide = false
     private var wasBubbleVisibleBeforeEnvironmentHide = false
 
-    init(videoName: String, name: String) {
+    init(videoName: String, name: String, role: CharacterRole) {
         self.videoName = videoName
         self.name = name
+        self.role = role
         self.displayHeight = size.height
+        if role == .reminders {
+            let manager = ReminderManager()
+            reminderManager = manager
+            manager.onReminderFired = { [weak self] reminder in
+                DispatchQueue.main.async {
+                    self?.handleReminderFired(reminder)
+                }
+            }
+
+            let calendar = CalendarAlertManager()
+            calendarAlertManager = calendar
+            calendar.onCalendarAlert = { [weak self] eventTitle in
+                DispatchQueue.main.async {
+                    self?.handleCalendarAlert(eventTitle: eventTitle)
+                }
+            }
+            calendar.onAccessChanged = { [weak self] connected in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.reminderView?.updateCalendarStatus(
+                        message: self.calendarAlertManager?.statusMessage ?? "",
+                        isConnected: connected
+                    )
+                }
+            }
+        }
+    }
+
+    private var calendarHasAccess: Bool {
+        GoogleOAuth.shared.isConnected
     }
 
     // MARK: - Setup
@@ -116,6 +152,7 @@ class WalkerCharacter {
             CATransaction.commit()
             
             self.updateFlip()
+            self.updateNameBadgePosition()
         }
     }
 
@@ -161,6 +198,69 @@ class WalkerCharacter {
 
         window.contentView = hostView
         window.orderFrontRegardless()
+        setupNameBadge()
+        if role == .reminders {
+            calendarAlertManager?.start()
+        }
+    }
+
+    private func setupNameBadge() {
+        let t = resolvedTheme
+        let badgeText = "\(name) · \(role.subtitle)"
+        let font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        let textSize = (badgeText as NSString).size(withAttributes: [.font: font])
+        let pad: CGFloat = 8
+        let badgeW = ceil(textSize.width) + pad * 2
+        let badgeH: CGFloat = 20
+
+        let win = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: badgeW, height: badgeH),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        win.isOpaque = false
+        win.backgroundColor = .clear
+        win.hasShadow = true
+        win.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 3)
+        win.ignoresMouseEvents = true
+        win.collectionBehavior = [.moveToActiveSpace, .stationary]
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: badgeW, height: badgeH))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = t.bubbleBg.cgColor
+        container.layer?.cornerRadius = badgeH / 2
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = characterColor.withAlphaComponent(0.85).cgColor
+
+        let label = NSTextField(labelWithString: badgeText)
+        label.font = font
+        label.textColor = t.textPrimary
+        label.alignment = .center
+        label.frame = NSRect(x: 0, y: 2, width: badgeW, height: badgeH - 4)
+        container.addSubview(label)
+
+        win.contentView = container
+        nameBadgeWindow = win
+        updateNameBadgePosition()
+    }
+
+    func showNameBadgeOnHover() {
+        guard isManuallyVisible, environmentHiddenAt == nil else { return }
+        updateNameBadgePosition()
+        nameBadgeWindow?.orderFrontRegardless()
+    }
+
+    func hideNameBadgeOnHover() {
+        nameBadgeWindow?.orderOut(nil)
+    }
+
+    private func updateNameBadgePosition() {
+        guard let badge = nameBadgeWindow else { return }
+        let charFrame = window.frame
+        let x = charFrame.midX - badge.frame.width / 2
+        let y = charFrame.maxY + 6
+        badge.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
     // MARK: - Visibility
@@ -176,6 +276,7 @@ class WalkerCharacter {
             window.orderOut(nil)
             popoverWindow?.orderOut(nil)
             thinkingBubbleWindow?.orderOut(nil)
+            hideNameBadgeOnHover()
         }
     }
 
@@ -190,6 +291,7 @@ class WalkerCharacter {
         window.orderOut(nil)
         popoverWindow?.orderOut(nil)
         thinkingBubbleWindow?.orderOut(nil)
+        hideNameBadgeOnHover()
     }
 
     func showForEnvironmentIfNeeded() {
@@ -257,11 +359,12 @@ class WalkerCharacter {
         let welcome = """
         hey! we're bruce and jazz — your lil dock agents.
 
-        click either of us to open a Claude AI chat. we'll walk around while you work and let you know when Claude's thinking.
+        bruce · claude — click to chat with Claude AI.
+        jazz · reminders — click to set timed reminders with sounds.
 
         check the menu bar icon (top right) for themes, sounds, and more options.
 
-        click anywhere outside to dismiss, then click us again to start chatting.
+        click anywhere outside to dismiss, then click us again to get started.
         """
         terminalView?.appendStreamingText(welcome)
         terminalView?.endStreaming()
@@ -294,6 +397,14 @@ class WalkerCharacter {
     }
 
     func openPopover() {
+        if role == .reminders {
+            openReminderPopover()
+            return
+        }
+        openClaudePopover()
+    }
+
+    private func openClaudePopover() {
         // Close any other open popover
         if let siblings = controller?.characters {
             for sibling in siblings where sibling !== self && sibling.isIdleForPopover {
@@ -355,6 +466,123 @@ class WalkerCharacter {
         }
     }
 
+    private func openReminderPopover(alertMessage: String? = nil) {
+        if let siblings = controller?.characters {
+            for sibling in siblings where sibling !== self && sibling.isIdleForPopover {
+                sibling.closePopover()
+            }
+        }
+
+        isIdleForPopover = true
+        isWalking = false
+        isPaused = true
+        queuePlayer.pause()
+        queuePlayer.seek(to: .zero)
+        showingCompletion = false
+        isJazzAlert = false
+        hideBubble()
+
+        if popoverWindow == nil {
+            createReminderPopoverWindow()
+        }
+        reminderView?.reloadList(reminders: reminderManager?.reminders ?? [])
+        reminderView?.updateCalendarStatus(
+            message: calendarAlertManager?.statusMessage ?? "",
+            isConnected: calendarHasAccess
+        )
+
+        if let alertMessage {
+            reminderView?.showActiveAlert(alertMessage)
+        } else {
+            reminderView?.clearActiveAlert()
+        }
+
+        updatePopoverPosition()
+        popoverWindow?.orderFrontRegardless()
+        popoverWindow?.makeKey()
+        popoverWindow?.makeFirstResponder(reminderView?.messageField)
+
+        removeEventMonitors()
+        clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self = self, let popover = self.popoverWindow else { return }
+            let popoverFrame = popover.frame
+            let charFrame = self.window.frame
+            if !popoverFrame.contains(NSEvent.mouseLocation) && !charFrame.contains(NSEvent.mouseLocation) {
+                self.closePopover()
+            }
+        }
+        escapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 {
+                self?.closePopover()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func handleReminderFired(_ reminder: Reminder) {
+        let bubble = JazzSettings.alertBubble(kind: reminder.kind, message: reminder.message)
+        presentJazzAlert(bubbleText: bubble, kind: reminder.kind)
+        reminderView?.reloadList(reminders: reminderManager?.reminders ?? [])
+    }
+
+    private func handleCalendarAlert(eventTitle: String) {
+        let bubble = JazzSettings.calendarBubble(eventTitle: eventTitle)
+        presentJazzAlert(bubbleText: bubble, kind: .reminder)
+    }
+
+    private func presentJazzAlert(bubbleText: String, kind: ReminderKind) {
+        AlertSound.playReminderAlert(title: JazzSettings.alertTitle(kind: kind), body: bubbleText)
+        openReminderPopover(alertMessage: bubbleText)
+    }
+
+    private func showAlertBubble(text: String) {
+        let t = resolvedTheme
+        if thinkingBubbleWindow == nil {
+            createThinkingBubble()
+        }
+
+        let maxW: CGFloat = 280
+        let padding: CGFloat = 14
+        let font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        paragraph.alignment = .center
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: paragraph]
+        let bounds = (text as NSString).boundingRect(
+            with: NSSize(width: maxW - padding * 2, height: 120),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attrs
+        )
+        let bubbleW = min(maxW, max(ceil(bounds.width) + padding * 2, 96))
+        let bubbleH = max(Self.bubbleH + 4, ceil(bounds.height) + 14)
+
+        let charFrame = window.frame
+        let x = charFrame.midX - bubbleW / 2
+        let y = charFrame.origin.y + charFrame.height * 0.82
+        thinkingBubbleWindow?.setFrame(CGRect(x: x, y: y, width: bubbleW, height: bubbleH), display: false)
+
+        if let container = thinkingBubbleWindow?.contentView {
+            container.frame = NSRect(x: 0, y: 0, width: bubbleW, height: bubbleH)
+            container.layer?.backgroundColor = t.bubbleBg.cgColor
+            container.layer?.cornerRadius = t.bubbleCornerRadius
+            container.layer?.borderColor = t.bubbleCompletionBorder.cgColor
+            container.layer?.borderWidth = 1.5
+            if let label = container.viewWithTag(100) as? NSTextField {
+                label.font = font
+                label.textColor = t.bubbleCompletionText
+                label.alignment = .center
+                label.lineBreakMode = .byWordWrapping
+                label.maximumNumberOfLines = 3
+                label.frame = NSRect(x: padding, y: 6, width: bubbleW - padding * 2, height: bubbleH - 12)
+                label.stringValue = text
+            }
+        }
+
+        thinkingBubbleWindow?.alphaValue = 1.0
+        thinkingBubbleWindow?.orderFrontRegardless()
+    }
+
     func closePopover() {
         guard isIdleForPopover else { return }
 
@@ -362,15 +590,12 @@ class WalkerCharacter {
         removeEventMonitors()
 
         isIdleForPopover = false
+        reminderView?.clearActiveAlert()
 
-        // If still waiting for a response, show thinking bubble immediately
-        // If completion came while popover was open, show completion bubble
         if showingCompletion {
-            // Reset expiry so user gets the full 3s from now
             completionBubbleExpiry = CACurrentMediaTime() + 3.0
             showBubble(text: currentPhrase, isCompletion: true)
         } else if isAgentBusy {
-            // Force a fresh phrase pick and show immediately
             currentPhrase = ""
             lastPhraseUpdate = 0
             updateThinkingPhrase()
@@ -478,7 +703,95 @@ class WalkerCharacter {
         terminalView = terminal
     }
 
+    func createReminderPopoverWindow() {
+        let t = resolvedTheme
+        let popoverWidth: CGFloat = 440
+        let popoverHeight: CGFloat = 400
+
+        let win = KeyableWindow(
+            contentRect: CGRect(x: 0, y: 0, width: popoverWidth, height: popoverHeight),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        win.isOpaque = false
+        win.backgroundColor = .clear
+        win.hasShadow = true
+        win.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 10)
+        win.collectionBehavior = [.moveToActiveSpace, .stationary]
+        let brightness = t.popoverBg.redComponent * 0.299 + t.popoverBg.greenComponent * 0.587 + t.popoverBg.blueComponent * 0.114
+        win.appearance = NSAppearance(named: brightness < 0.5 ? .darkAqua : .aqua)
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: popoverWidth, height: popoverHeight))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = t.popoverBg.cgColor
+        container.layer?.cornerRadius = t.popoverCornerRadius
+        container.layer?.masksToBounds = true
+        container.layer?.borderWidth = t.popoverBorderWidth
+        container.layer?.borderColor = t.popoverBorder.cgColor
+        container.autoresizingMask = [.width, .height]
+
+        let titleBar = NSView(frame: NSRect(x: 0, y: popoverHeight - 28, width: popoverWidth, height: 28))
+        titleBar.wantsLayer = true
+        titleBar.layer?.backgroundColor = t.titleBarBg.cgColor
+        container.addSubview(titleBar)
+
+        let titleLabel = NSTextField(labelWithString: "\(name.uppercased()) · REMINDERS")
+        titleLabel.font = t.titleFont
+        titleLabel.textColor = t.titleText
+        titleLabel.sizeToFit()
+        titleLabel.frame.origin = NSPoint(x: 12, y: 6)
+        titleBar.addSubview(titleLabel)
+
+        let sep = NSView(frame: NSRect(x: 0, y: popoverHeight - 29, width: popoverWidth, height: 1))
+        sep.wantsLayer = true
+        sep.layer?.backgroundColor = t.separatorColor.cgColor
+        container.addSubview(sep)
+
+        let panel = ReminderView(frame: NSRect(x: 0, y: 0, width: popoverWidth, height: popoverHeight - 29))
+        panel.applyTheme(t.withCharacterColor(characterColor), characterColor: characterColor)
+        panel.autoresizingMask = [.width, .height]
+        panel.onAdd = { [weak self] kind, message, date in
+            self?.reminderManager?.add(message: message, fireDate: date, kind: kind)
+            panel.reloadList(reminders: self?.reminderManager?.reminders ?? [])
+        }
+        panel.onDelete = { [weak self] id in
+            self?.reminderManager?.remove(id: id)
+            panel.reloadList(reminders: self?.reminderManager?.reminders ?? [])
+        }
+        panel.onGrantCalendarAccess = { [weak self] in
+            guard let self else { return }
+            if self.calendarHasAccess {
+                self.calendarAlertManager?.disconnect()
+                self.reminderView?.updateCalendarStatus(
+                    message: self.calendarAlertManager?.statusMessage ?? "",
+                    isConnected: false
+                )
+            } else {
+                self.calendarAlertManager?.requestAccess { _ in
+                    self.reminderView?.updateCalendarStatus(
+                        message: self.calendarAlertManager?.statusMessage ?? "",
+                        isConnected: self.calendarHasAccess
+                    )
+                }
+            }
+        }
+        panel.onDismissAlert = { [weak self] in
+            self?.closePopover()
+        }
+        panel.updateCalendarStatus(
+            message: calendarAlertManager?.statusMessage ?? "",
+            isConnected: calendarHasAccess
+        )
+        container.addSubview(panel)
+
+        win.contentView = container
+        popoverWindow = win
+        reminderView = panel
+    }
+
     func resetSession() {
+        guard role == .claude else { return }
         session?.terminate()
         session = nil
         currentStreamingText = ""
@@ -592,6 +905,7 @@ class WalkerCharacter {
     var currentPhrase = ""
     var completionBubbleExpiry: CFTimeInterval = 0
     var showingCompletion = false
+    private var isJazzAlert = false
 
     private static let bubbleH: CGFloat = 26
     private var phraseAnimating = false
@@ -602,12 +916,15 @@ class WalkerCharacter {
         if showingCompletion {
             if now >= completionBubbleExpiry {
                 showingCompletion = false
+                isJazzAlert = false
                 hideBubble()
                 return
             }
-            if isIdleForPopover {
+            if isIdleForPopover && !isJazzAlert {
                 completionBubbleExpiry += 1.0 / 60.0
                 hideBubble()
+            } else if isJazzAlert {
+                showAlertBubble(text: currentPhrase)
             } else {
                 showBubble(text: currentPhrase, isCompletion: true)
             }
@@ -772,10 +1089,31 @@ class WalkerCharacter {
         ("ping-dd", "mp3"), ("ping-ee", "mp3"), ("ping-ff", "mp3"),
         ("ping-gg", "mp3"), ("ping-hh", "mp3"), ("ping-jj", "m4a")
     ]
+    private static let jazzAlertSoundNames = ["Glass", "Ping", "Hero", "Pop", "Sosumi"]
     private static var lastSoundIndex: Int = -1
+    private static var activeSound: NSSound?
+
+    func playJazzAlertSound() {
+        guard Self.soundsEnabled else { return }
+        for name in Self.jazzAlertSoundNames {
+            if let sound = NSSound(named: NSSound.Name(name)) {
+                Self.activeSound = sound
+                sound.volume = 1.0
+                if sound.play() { return }
+            }
+        }
+        if playBundledCompletionSound() { return }
+        NSSound.beep()
+    }
 
     func playCompletionSound() {
         guard Self.soundsEnabled else { return }
+        if playBundledCompletionSound() { return }
+        NSSound.beep()
+    }
+
+    @discardableResult
+    private func playBundledCompletionSound() -> Bool {
         var idx: Int
         repeat {
             idx = Int.random(in: 0..<Self.completionSounds.count)
@@ -783,10 +1121,13 @@ class WalkerCharacter {
         Self.lastSoundIndex = idx
 
         let s = Self.completionSounds[idx]
-        if let url = Bundle.main.url(forResource: s.name, withExtension: s.ext, subdirectory: "Sounds"),
-           let sound = NSSound(contentsOf: url, byReference: true) {
-            sound.play()
+        guard let url = Bundle.main.url(forResource: s.name, withExtension: s.ext, subdirectory: "Sounds"),
+              let sound = NSSound(contentsOf: url, byReference: false) else {
+            return false
         }
+        Self.activeSound = sound
+        sound.volume = 1.0
+        return sound.play()
     }
 
     // MARK: - Walking
@@ -898,6 +1239,7 @@ class WalkerCharacter {
             let bottomPadding = displayHeight * 0.15
             let y = dockTopY - bottomPadding + yOffset
             window.setFrameOrigin(NSPoint(x: x, y: y))
+            updateNameBadgePosition()
             updatePopoverPosition()
             updateThinkingBubble()
             return
@@ -914,6 +1256,7 @@ class WalkerCharacter {
                 let bottomPadding = displayHeight * 0.15
                 let y = dockTopY - bottomPadding + yOffset
                 window.setFrameOrigin(NSPoint(x: x, y: y))
+                updateNameBadgePosition()
                 return
             }
         }
@@ -944,6 +1287,7 @@ class WalkerCharacter {
             window.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
+        updateNameBadgePosition()
         updateThinkingBubble()
     }
 }
