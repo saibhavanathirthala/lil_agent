@@ -22,15 +22,6 @@ enum CharacterSize: String, CaseIterable {
 class WalkerCharacter {
     let videoName: String
     let name: String
-    var provider: AgentProvider {
-        get {
-            let raw = UserDefaults.standard.string(forKey: "\(name)Provider") ?? "claude"
-            return AgentProvider(rawValue: raw) ?? .claude
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: "\(name)Provider")
-        }
-    }
     var size: CharacterSize {
         get {
             let raw = UserDefaults.standard.string(forKey: "\(name)Size") ?? "big"
@@ -321,7 +312,7 @@ class WalkerCharacter {
         hideBubble()
 
         if session == nil {
-            let newSession = provider.createSession()
+            let newSession = ClaudeSession()
             session = newSession
             wireSession(newSession)
             newSession.start()
@@ -438,29 +429,12 @@ class WalkerCharacter {
         titleBar.layer?.backgroundColor = t.titleBarBg.cgColor
         container.addSubview(titleBar)
 
-        let titleLabel = NSTextField(labelWithString: t.titleString(for: provider))
+        let titleLabel = NSTextField(labelWithString: t.claudeTitleString())
         titleLabel.font = t.titleFont
         titleLabel.textColor = t.titleText
         titleLabel.sizeToFit()
         titleLabel.frame.origin = NSPoint(x: 12, y: 6)
         titleBar.addSubview(titleLabel)
-
-        let arrowBtn = NSButton(frame: NSRect(x: titleLabel.frame.maxX + 2, y: 5, width: 16, height: 16))
-        arrowBtn.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Switch provider")
-        arrowBtn.imageScaling = .scaleProportionallyDown
-        arrowBtn.bezelStyle = .inline
-        arrowBtn.isBordered = false
-        arrowBtn.contentTintColor = t.titleText.withAlphaComponent(0.75)
-        arrowBtn.target = self
-        arrowBtn.action = #selector(showProviderMenu(_:))
-        titleBar.addSubview(arrowBtn)
-
-        // Make the title label clickable too
-        let clickArea = NSButton(frame: NSRect(x: 0, y: 0, width: arrowBtn.frame.maxX + 4, height: 28))
-        clickArea.isTransparent = true
-        clickArea.target = self
-        clickArea.action = #selector(showProviderMenu(_:))
-        titleBar.addSubview(clickArea)
 
         let refreshBtn = NSButton(frame: NSRect(x: popoverWidth - 48, y: 5, width: 16, height: 16))
         refreshBtn.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
@@ -490,7 +464,6 @@ class WalkerCharacter {
         let terminal = TerminalView(frame: NSRect(x: 0, y: 0, width: popoverWidth, height: popoverHeight - 29))
         terminal.characterColor = characterColor
         terminal.themeOverride = themeOverride
-        terminal.provider = provider
         terminal.autoresizingMask = [.width, .height]
         terminal.onSendMessage = { [weak self] message in
             self?.session?.send(message: message)
@@ -515,7 +488,7 @@ class WalkerCharacter {
         hideBubble()
         terminalView?.resetState()
         terminalView?.showSessionMessage()
-        let newSession = provider.createSession()
+        let newSession = ClaudeSession()
         session = newSession
         wireSession(newSession)
         newSession.start()
@@ -537,6 +510,14 @@ class WalkerCharacter {
             self?.terminalView?.appendError(text)
         }
 
+        session.onPermissionRequest = { [weak self] request in
+            self?.terminalView?.showPermissionRequest(
+                toolName: request.toolName,
+                detail: request.detail,
+                respond: request.respond
+            )
+        }
+
         session.onToolUse = { [weak self] toolName, input in
             guard let self = self else { return }
             let summary = self.formatToolInput(input)
@@ -550,48 +531,10 @@ class WalkerCharacter {
         session.onProcessExit = { [weak self] in
             guard let self = self else { return }
             self.terminalView?.endStreaming()
-            self.terminalView?.appendError("\(self.provider.displayName) session ended.")
+            self.terminalView?.appendError("\(ClaudeAgent.displayName) session ended.")
         }
 
         session.onSessionReady = { }
-    }
-
-    @objc func showProviderMenu(_ sender: Any) {
-        let menu = NSMenu()
-        let menuFont = NSFont.systemFont(ofSize: 12, weight: .regular)
-        for p in AgentProvider.allCases {
-            let item = NSMenuItem(title: p.displayName, action: #selector(providerMenuItemSelected(_:)), keyEquivalent: "")
-            item.target = self
-            item.attributedTitle = NSAttributedString(string: p.displayName, attributes: [.font: menuFont])
-            item.representedObject = p.rawValue
-            if p == provider {
-                item.state = .on
-            }
-            if !p.isAvailable {
-                item.isEnabled = false
-            }
-            menu.addItem(item)
-        }
-        // Show menu below the title bar area
-        if let titleBar = popoverWindow?.contentView?.subviews.first(where: { $0.frame.origin.y > 0 && $0.frame.height == 28 }) {
-            menu.popUp(positioning: nil, at: NSPoint(x: 10, y: 0), in: titleBar)
-        }
-    }
-
-    @objc func providerMenuItemSelected(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let newProvider = AgentProvider(rawValue: raw),
-              newProvider != provider else { return }
-        provider = newProvider
-        // Terminate existing session and rebuild popover for new provider
-        session?.terminate()
-        session = nil
-        popoverWindow?.orderOut(nil)
-        popoverWindow = nil
-        terminalView = nil
-        thinkingBubbleWindow?.orderOut(nil)
-        thinkingBubbleWindow = nil
-        openPopover()
     }
 
     @objc func copyLastResponseFromButton() {

@@ -51,18 +51,27 @@ class TerminalView: NSView {
     let scrollView = NSScrollView()
     let textView = NSTextView()
     let inputField = NSTextField()
+    private let permissionBar = NSView()
+    private let permissionTitleLabel = NSTextField(labelWithString: "")
+    private let permissionDetailScroll = NSScrollView()
+    private let permissionDetailView = NSTextView()
+    private let allowButton = NSButton(title: "Allow", target: nil, action: nil)
+    private let denyButton = NSButton(title: "Deny", target: nil, action: nil)
     var onSendMessage: ((String) -> Void)?
     var onClearRequested: (() -> Void)?
-    var provider: AgentProvider = .claude {
-        didSet {
-            updatePlaceholder()
-        }
-    }
 
     private var currentAssistantText = ""
     private var lastAssistantText = ""
     private var isStreaming = false
     private var showingSessionMessage = false
+    private var pendingPermissionRespond: ((Bool) -> Void)?
+    private let inputHeight: CGFloat = 30
+    private let permissionTitleHeight: CGFloat = 20
+    private let permissionButtonHeight: CGFloat = 26
+    private let permissionDetailMinHeight: CGFloat = 36
+    private let permissionDetailMaxHeight: CGFloat = 120
+    private var permissionBarHeight: CGFloat = 0
+    private let padding: CGFloat = 10
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -88,21 +97,16 @@ class TerminalView: NSView {
     private func updatePlaceholder() {
         let t = theme
         inputField.placeholderAttributedString = NSAttributedString(
-            string: provider.inputPlaceholder,
+            string: ClaudeAgent.inputPlaceholder,
             attributes: [.font: t.font, .foregroundColor: t.textDim]
         )
     }
 
     private func setupViews() {
         let t = theme
-        let inputHeight: CGFloat = 30
-        let padding: CGFloat = 10
 
-        scrollView.frame = NSRect(
-            x: padding, y: inputHeight + padding + 6,
-            width: frame.width - padding * 2,
-            height: frame.height - inputHeight - padding - 10
-        )
+        setupPermissionBar(theme: t)
+
         scrollView.autoresizingMask = [.width, .height]
         scrollView.hasVerticalScroller = true
         scrollView.scrollerStyle = .overlay
@@ -134,12 +138,6 @@ class TerminalView: NSView {
         scrollView.documentView = textView
         addSubview(scrollView)
 
-        inputField.frame = NSRect(
-            x: padding, y: 6,
-            width: frame.width - padding * 2,
-            height: inputHeight
-        )
-        inputField.autoresizingMask = [.width]
         inputField.focusRingType = .none
         let paddedCell = PaddedTextFieldCell(textCell: "")
         paddedCell.isEditable = true
@@ -155,6 +153,196 @@ class TerminalView: NSView {
         inputField.target = self
         inputField.action = #selector(inputSubmitted)
         addSubview(inputField)
+        layoutSubviews()
+    }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        layoutSubviews()
+    }
+
+    private func setupPermissionBar(theme t: PopoverTheme) {
+        permissionBar.isHidden = true
+        permissionBar.wantsLayer = true
+        permissionBar.layer?.backgroundColor = t.inputBg.cgColor
+        permissionBar.layer?.cornerRadius = t.inputCornerRadius
+
+        permissionTitleLabel.font = t.fontBold
+        permissionTitleLabel.textColor = t.textPrimary
+        permissionBar.addSubview(permissionTitleLabel)
+
+        permissionDetailScroll.hasVerticalScroller = true
+        permissionDetailScroll.scrollerStyle = .overlay
+        permissionDetailScroll.hasHorizontalScroller = false
+        permissionDetailScroll.borderType = .noBorder
+        permissionDetailScroll.drawsBackground = false
+        permissionDetailScroll.autohidesScrollers = true
+
+        permissionDetailView.isEditable = false
+        permissionDetailView.isSelectable = true
+        permissionDetailView.drawsBackground = false
+        permissionDetailView.backgroundColor = .clear
+        permissionDetailView.textColor = t.textPrimary
+        permissionDetailView.font = NSFont.monospacedSystemFont(ofSize: t.font.pointSize - 1, weight: .regular)
+        permissionDetailView.textContainerInset = NSSize(width: 2, height: 2)
+        permissionDetailView.textContainer?.widthTracksTextView = true
+        permissionDetailView.isVerticallyResizable = true
+        permissionDetailView.isHorizontallyResizable = false
+        permissionDetailScroll.documentView = permissionDetailView
+        permissionBar.addSubview(permissionDetailScroll)
+
+        allowButton.bezelStyle = .rounded
+        allowButton.font = t.fontBold
+        allowButton.target = self
+        allowButton.action = #selector(permissionAllowed)
+        permissionBar.addSubview(allowButton)
+
+        denyButton.bezelStyle = .rounded
+        denyButton.font = t.font
+        denyButton.target = self
+        denyButton.action = #selector(permissionDenied)
+        permissionBar.addSubview(denyButton)
+
+        addSubview(permissionBar)
+    }
+
+    private func measuredPermissionDetailHeight(for detail: String, width: CGFloat) -> CGFloat {
+        let font = permissionDetailView.font ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        let textWidth = max(80, width - 16)
+        let rect = (detail as NSString).boundingRect(
+            with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        )
+        return min(permissionDetailMaxHeight, max(permissionDetailMinHeight, ceil(rect.height) + 8))
+    }
+
+    private func updatePermissionBarHeight(detail: String) {
+        let contentWidth = frame.width - padding * 2
+        let detailHeight = measuredPermissionDetailHeight(for: detail, width: contentWidth)
+        permissionBarHeight = 8 + permissionTitleHeight + 4 + detailHeight + 8
+    }
+
+    private func layoutSubviews() {
+        let bottomStackHeight = inputHeight + padding + 6
+            + (permissionBar.isHidden ? 0 : permissionBarHeight + 6)
+
+        scrollView.frame = NSRect(
+            x: padding, y: bottomStackHeight,
+            width: frame.width - padding * 2,
+            height: max(0, frame.height - bottomStackHeight - padding)
+        )
+
+        inputField.frame = NSRect(
+            x: padding, y: 6,
+            width: frame.width - padding * 2,
+            height: inputHeight
+        )
+        inputField.autoresizingMask = [.width]
+
+        let permissionY = inputHeight + 12
+        permissionBar.frame = NSRect(
+            x: padding, y: permissionY,
+            width: frame.width - padding * 2,
+            height: permissionBar.isHidden ? 0 : permissionBarHeight
+        )
+        permissionBar.autoresizingMask = [.width]
+
+        let buttonWidth: CGFloat = 64
+        let topRowY = max(8, permissionBarHeight - permissionTitleHeight - 6)
+        allowButton.frame = NSRect(
+            x: permissionBar.bounds.width - buttonWidth * 2 - 8,
+            y: topRowY - 1, width: buttonWidth, height: permissionButtonHeight
+        )
+        allowButton.autoresizingMask = [.minXMargin]
+        denyButton.frame = NSRect(
+            x: permissionBar.bounds.width - buttonWidth - 4,
+            y: topRowY - 1, width: buttonWidth, height: permissionButtonHeight
+        )
+        denyButton.autoresizingMask = [.minXMargin]
+
+        permissionTitleLabel.frame = NSRect(
+            x: 8, y: topRowY,
+            width: max(0, permissionBar.bounds.width - buttonWidth * 2 - 20),
+            height: permissionTitleHeight
+        )
+        permissionTitleLabel.autoresizingMask = [.width]
+
+        let detailHeight = max(0, topRowY - 10)
+        permissionDetailScroll.frame = NSRect(
+            x: 8, y: 8,
+            width: permissionBar.bounds.width - 16,
+            height: detailHeight
+        )
+        permissionDetailScroll.autoresizingMask = [.width]
+
+        if detailHeight > 0, let container = permissionDetailView.textContainer,
+           let manager = permissionDetailView.layoutManager {
+            container.containerSize = NSSize(width: permissionDetailScroll.contentSize.width, height: .greatestFiniteMagnitude)
+            manager.ensureLayout(for: container)
+            let used = manager.usedRect(for: container)
+            permissionDetailView.frame = NSRect(
+                x: 0, y: 0,
+                width: permissionDetailScroll.contentSize.width,
+                height: max(detailHeight, used.height + 8)
+            )
+        }
+    }
+
+    func showPermissionRequest(toolName: String, detail: String, respond: @escaping (Bool) -> Void) {
+        let t = theme
+        pendingPermissionRespond = respond
+        permissionTitleLabel.stringValue = "Allow \(toolName)?"
+        permissionTitleLabel.textColor = t.textPrimary
+        permissionDetailView.font = NSFont.monospacedSystemFont(ofSize: t.font.pointSize - 1, weight: .regular)
+        permissionDetailView.textColor = t.textPrimary
+        permissionDetailView.string = detail
+        if detail.contains("⚠ Sensitive path") {
+            let attr = NSMutableAttributedString(string: detail)
+            let range = (detail as NSString).range(of: "⚠ Sensitive path — review carefully")
+            if range.location != NSNotFound {
+                attr.addAttribute(.foregroundColor, value: t.errorColor, range: range)
+            }
+            permissionDetailView.textStorage?.setAttributedString(attr)
+        }
+        permissionBar.layer?.backgroundColor = t.inputBg.cgColor
+        updatePermissionBarHeight(detail: detail)
+        permissionBar.isHidden = false
+        inputField.isEnabled = false
+        layoutSubviews()
+        permissionDetailScroll.documentView?.scrollToVisible(
+            NSRect(x: 0, y: 0, width: 1, height: 1)
+        )
+        scrollToBottom()
+        window?.makeFirstResponder(allowButton)
+    }
+
+    private func resolvePermission(allowed: Bool) {
+        guard let respond = pendingPermissionRespond else { return }
+        pendingPermissionRespond = nil
+        permissionBar.isHidden = true
+        permissionBarHeight = 0
+        permissionDetailView.string = ""
+        inputField.isEnabled = true
+        layoutSubviews()
+
+        let t = theme
+        let status = allowed ? "allowed" : "denied"
+        textView.textStorage?.append(NSAttributedString(
+            string: "  PERMISSION \(status)\n",
+            attributes: [.font: t.fontBold, .foregroundColor: allowed ? t.successColor : t.errorColor]
+        ))
+        scrollToBottom()
+        respond(allowed)
+        window?.makeFirstResponder(inputField)
+    }
+
+    @objc private func permissionAllowed() {
+        resolvePermission(allowed: true)
+    }
+
+    @objc private func permissionDenied() {
+        resolvePermission(allowed: false)
     }
 
     func resetState() {
@@ -162,7 +350,13 @@ class TerminalView: NSView {
         currentAssistantText = ""
         lastAssistantText = ""
         showingSessionMessage = false
+        pendingPermissionRespond = nil
+        permissionBar.isHidden = true
+        permissionBarHeight = 0
+        permissionDetailView.string = ""
+        inputField.isEnabled = true
         textView.textStorage?.setAttributedString(NSAttributedString(string: ""))
+        layoutSubviews()
     }
 
     func showSessionMessage() {

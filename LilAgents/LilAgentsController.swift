@@ -12,16 +12,6 @@ class LilAgentsController {
         let char1 = WalkerCharacter(videoName: "walk-bruce-01", name: "Bruce")
         let char2 = WalkerCharacter(videoName: "walk-jazz-01", name: "Jazz")
 
-        // Detect available providers, then set first-run defaults
-        AgentProvider.detectAvailableProviders { [weak char1, weak char2] in
-            guard let char1 = char1, let char2 = char2 else { return }
-            if !UserDefaults.standard.bool(forKey: Self.onboardingKey) {
-                let first = AgentProvider.firstAvailable
-                char1.provider = first
-                char2.provider = first
-            }
-        }
-
         char1.accelStart = 3.0
         char1.fullSpeedStart = 3.75
         char1.decelStart = 8.0
@@ -188,10 +178,12 @@ class LilAgentsController {
         if pinnedScreenIndex >= 0, pinnedScreenIndex < NSScreen.screens.count {
             return true
         }
+        // Show on the dock screen regardless of which app has keyboard focus.
+        let isDockHost = screenHasDock(screen)
         return DockVisibility.shouldShowCharacters(
             screenFrame: screen.frame,
             visibleFrame: screen.visibleFrame,
-            isMainScreen: screen == NSScreen.main,
+            isMainScreen: isDockHost,
             dockAutohideEnabled: dockAutohideEnabled()
         )
     }

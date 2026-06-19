@@ -8,7 +8,7 @@ Open `lil-agents.xcodeproj` in Xcode and build the `LilAgents` scheme. No comman
 
 ## Architecture Overview
 
-This is a macOS AppKit application that displays animated characters walking on the Dock, providing a GUI for AI CLI tools.
+This is a macOS AppKit application that displays animated characters walking on the Dock, providing a GUI for Claude Code CLI.
 
 ### Core Components
 
@@ -16,16 +16,14 @@ This is a macOS AppKit application that displays animated characters walking on 
 
 **`WalkerCharacter`** — Individual character with:
 - AVPlayerLayer for transparent HEVC video animation
-- Per-character `provider` and `size` stored in UserDefaults (`"{name}Provider"`, `"{name}Size"`)
-- Manages popover terminal window and AI session lifecycle
+- Per-character `size` stored in UserDefaults (`"{name}Size"`)
+- Manages popover terminal window and Claude session lifecycle
 
-**`AgentSession`** — Protocol for CLI interaction. Each provider has a session class:
-- `ClaudeSession` — NDJSON streaming (`--output-format stream-json`)
-- `CodexSession`, `CopilotSession`, `GeminiSession`, `OpenCodeSession` — similar patterns
+**`ClaudeSession`** — Claude Code CLI interaction via NDJSON streaming (`--output-format stream-json`). Strict permission mode with in-app Allow/Deny prompts via `--permission-prompt-tool stdio`.
 
-**`ShellEnvironment`** — Resolves user's login shell PATH via `/bin/zsh -l -i -c env` to locate CLI binaries. Caches results. Removes `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` from spawned process environment to prevent nested session detection.
+**`ShellEnvironment`** — Resolves user's login shell PATH via `/bin/zsh -l -i -c env` to locate the `claude` binary. Caches results. Removes `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` from spawned process environment to prevent nested session detection.
 
-**`TerminalView`** — AppKit view rendering themed terminal with basic Markdown support and auto-scrolling.
+**`TerminalView`** — AppKit view rendering themed terminal with basic Markdown support, permission bar, and auto-scrolling.
 
 **`PopoverTheme`** — Centralized styling (colors, fonts) for terminal UI.
 
@@ -34,4 +32,4 @@ This is a macOS AppKit application that displays animated characters walking on 
 - **Dock positioning**: Reads `tilesize`, `persistent-apps`, `persistent-others`, `show-recents` from `com.apple.dock` defaults to calculate Dock width
 - **Window level**: Characters use `NSWindow.Level.statusBar + i` where i is sorted by x-position
 - **CLI discovery**: `ShellEnvironment.findBinary()` checks shell PATH first, then fallback paths like `~/.local/bin`, `/opt/homebrew/bin`
-- **Per-character config**: Each WalkerCharacter persists its own provider/size via UserDefaults with name-prefixed keys
+- **Per-character config**: Each WalkerCharacter persists its size via UserDefaults with name-prefixed keys

@@ -11,7 +11,7 @@ struct PopoverTheme {
     let titleText: NSColor
     let titleFont: NSFont
     let titleFormat: TitleFormat
-    func titleString(for provider: AgentProvider) -> String { provider.titleString(format: titleFormat) }
+    func claudeTitleString() -> String { ClaudeAgent.titleString(format: titleFormat) }
     let separatorColor: NSColor
     // Terminal
     let font: NSFont

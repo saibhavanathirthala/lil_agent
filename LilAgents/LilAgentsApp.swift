@@ -51,27 +51,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         soundItem.state = .on
         menu.addItem(soundItem)
 
-        // Provider submenu (applies to all characters)
-        let providerItem = NSMenuItem(title: "Provider", action: nil, keyEquivalent: "")
-        let providerMenu = NSMenu()
-        let currentProvider = controller?.characters.first?.provider ?? .claude
-        for (i, provider) in AgentProvider.allCases.enumerated() {
-            let item = NSMenuItem(title: provider.displayName, action: #selector(switchProvider(_:)), keyEquivalent: "")
-            item.tag = i
-            item.state = provider == currentProvider ? .on : .off
-            if !provider.isAvailable {
-                item.isEnabled = false
-            }
-            providerMenu.addItem(item)
-        }
-        providerMenu.addItem(NSMenuItem.separator())
-        let gatewayItem = NSMenuItem(title: "Advanced Settings\u{2026}", action: #selector(openGatewaySettings), keyEquivalent: "")
-        gatewayItem.tag = -1
-        providerMenu.addItem(gatewayItem)
-
-        providerItem.submenu = providerMenu
-        menu.addItem(providerItem)
-
         // Size submenu (applies to all characters)
         let sizeItem = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
         let sizeMenu = NSMenu()
@@ -164,31 +143,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc func switchProvider(_ sender: NSMenuItem) {
-        let idx = sender.tag
-        let allProviders = AgentProvider.allCases
-        guard idx < allProviders.count else { return }
-        let newProvider = allProviders[idx]
-
-        controller?.characters.forEach { char in
-            if char.provider == newProvider { return }
-            char.provider = newProvider
-            char.session?.terminate()
-            char.session = nil
-            char.popoverWindow?.orderOut(nil)
-            char.popoverWindow = nil
-            char.terminalView = nil
-            char.thinkingBubbleWindow?.orderOut(nil)
-            char.thinkingBubbleWindow = nil
-        }
-
-        if let providerMenu = sender.menu {
-            for item in providerMenu.items {
-                item.state = item.tag == idx ? .on : .off
-            }
-        }
-    }
-
     @objc func switchCharacterSize(_ sender: NSMenuItem) {
         let idx = sender.tag
         let allSizes = CharacterSize.allCases
@@ -242,17 +196,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func toggleSounds(_ sender: NSMenuItem) {
         WalkerCharacter.soundsEnabled.toggle()
         sender.state = WalkerCharacter.soundsEnabled ? .on : .off
-    }
-
-    @objc func openGatewaySettings() {
-        OpenClawSession.showSettingsPanel { [weak self] in
-            // If OpenClaw is the active provider, reconnect with new settings
-            guard AgentProvider.current == .openclaw else { return }
-            self?.controller?.characters.forEach { char in
-                char.session?.terminate()
-                char.session = nil
-            }
-        }
     }
 
     @objc func quitApp() {
