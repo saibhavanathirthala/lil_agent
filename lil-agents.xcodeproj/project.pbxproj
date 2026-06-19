@@ -28,8 +28,6 @@
 		A10000010000000000000041 /* CalendarAlertManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000040 /* CalendarAlertManager.swift */; };
 		A10000010000000000000042 /* JazzSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000041 /* JazzSettings.swift */; };
 		A10000010000000000000043 /* AlertSound.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000042 /* AlertSound.swift */; };
-		A10000010000000000000044 /* GoogleOAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000043 /* GoogleOAuth.swift */; };
-		A10000010000000000000045 /* GoogleOAuthLoopbackServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000044 /* GoogleOAuthLoopbackServer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,8 +53,6 @@
 		A10000020000000000000040 /* CalendarAlertManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarAlertManager.swift; sourceTree = "<group>"; };
 		A10000020000000000000041 /* JazzSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JazzSettings.swift; sourceTree = "<group>"; };
 		A10000020000000000000042 /* AlertSound.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertSound.swift; sourceTree = "<group>"; };
-		A10000020000000000000043 /* GoogleOAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuth.swift; sourceTree = "<group>"; };
-		A10000020000000000000044 /* GoogleOAuthLoopbackServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuthLoopbackServer.swift; sourceTree = "<group>"; };
 		A10000030000000000000001 /* lil agents.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "lil agents.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -96,8 +92,6 @@
 				A10000020000000000000040 /* CalendarAlertManager.swift */,
 				A10000020000000000000041 /* JazzSettings.swift */,
 				A10000020000000000000042 /* AlertSound.swift */,
-				A10000020000000000000043 /* GoogleOAuth.swift */,
-				A10000020000000000000044 /* GoogleOAuthLoopbackServer.swift */,
 				A10000020000000000000023 /* TerminalView.swift */,
 				A10000020000000000000024 /* WalkerCharacter.swift */,
 				A10000020000000000000025 /* LilAgentsController.swift */,
@@ -210,8 +204,6 @@
 				A10000010000000000000041 /* CalendarAlertManager.swift in Sources */,
 				A10000010000000000000042 /* JazzSettings.swift in Sources */,
 				A10000010000000000000043 /* AlertSound.swift in Sources */,
-				A10000010000000000000044 /* GoogleOAuth.swift in Sources */,
-				A10000010000000000000045 /* GoogleOAuthLoopbackServer.swift in Sources */,
 				A10000010000000000000023 /* TerminalView.swift in Sources */,
 				A10000010000000000000024 /* WalkerCharacter.swift in Sources */,
 				A10000010000000000000025 /* LilAgentsController.swift in Sources */,

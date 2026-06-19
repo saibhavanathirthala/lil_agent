@@ -1,6 +1,7 @@
+import EventKit
 import Foundation
 
-struct GoogleCalendarEvent {
+struct CalendarEvent {
     let id: String
     let title: String
     let startDate: Date
@@ -9,38 +10,41 @@ struct GoogleCalendarEvent {
 final class CalendarAlertManager {
     static let leadMinutes: TimeInterval = 10
 
+    private let eventStore = EKEventStore()
     private var pollTimer: Timer?
     private var alertedKeys = Set<String>()
-    private var isConnected = false
-    private var isAuthorizing = false
+    private var hasAccess = false
+    private var isRequestingAccess = false
     private var lastErrorMessage: String?
 
     var onCalendarAlert: ((String) -> Void)?
     var onAccessChanged: ((Bool) -> Void)?
 
+    var isConnected: Bool { hasAccess }
+
     var statusMessage: String {
-        if let lastErrorMessage, !lastErrorMessage.isEmpty, !GoogleOAuth.shared.isConfigured {
-            return lastErrorMessage
+        if hasAccess {
+            return "Apple Calendar connected — Jazz alerts 10 min before meetings."
         }
-        if !GoogleOAuth.shared.isConfigured {
-            return GoogleCalendarConfig.setupHint
+        if isRequestingAccess {
+            return "Waiting for calendar access…"
         }
-        if isConnected {
-            return "Google Calendar connected — Jazz alerts 10 min before meetings."
-        }
-        if isAuthorizing {
-            return GoogleOAuthError.authInProgress.localizedDescription ?? "Complete sign-in in your browser, then return to Jazz."
+        switch Self.authorizationStatus {
+        case .denied, .restricted, .writeOnly:
+            return "Calendar access denied. Enable it in System Settings → Privacy & Security → Calendars."
+        default:
+            break
         }
         if let lastErrorMessage, !lastErrorMessage.isEmpty {
             return lastErrorMessage
         }
-        return "Connect Google Calendar so Jazz can alert you 10 min before calls."
+        return "Connect Apple Calendar so Jazz can alert you 10 min before calls."
     }
 
     func start() {
-        isConnected = GoogleOAuth.shared.isConnected
-        onAccessChanged?(isConnected)
-        if isConnected {
+        hasAccess = Self.hasCalendarAccess
+        onAccessChanged?(hasAccess)
+        if hasAccess {
             startPolling()
         }
     }
@@ -50,67 +54,56 @@ final class CalendarAlertManager {
         pollTimer = nil
     }
 
-    func requestAccess(clientID: String, clientSecret: String, completion: ((Bool) -> Void)? = nil) {
-        let trimmedID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedSecret = clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedSecret = trimmedSecret.isEmpty ? GoogleOAuth.shared.storedClientSecret : trimmedSecret
-
-        guard !trimmedID.isEmpty, !resolvedSecret.isEmpty else {
-            lastErrorMessage = GoogleOAuthError.missingCredentials.localizedDescription
-            onAccessChanged?(false)
-            completion?(false)
+    func requestAccess(completion: ((Bool) -> Void)? = nil) {
+        if Self.hasCalendarAccess {
+            hasAccess = true
+            lastErrorMessage = nil
+            startPolling()
+            onAccessChanged?(true)
+            completion?(true)
             return
         }
 
-        saveCredentials(clientID: trimmedID, clientSecret: resolvedSecret)
-
-        guard GoogleOAuth.shared.isConfigured else {
-            lastErrorMessage = GoogleCalendarConfig.setupHint
-            onAccessChanged?(false)
-            completion?(false)
-            return
-        }
-
-        isAuthorizing = true
+        isRequestingAccess = true
         lastErrorMessage = nil
         onAccessChanged?(false)
 
-        GoogleOAuth.shared.authorize { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isAuthorizing = false
-                switch result {
-                case .success:
-                    self.lastErrorMessage = nil
-                    self.isConnected = true
-                    self.onAccessChanged?(true)
-                    self.startPolling()
-                    completion?(true)
-                case .failure(let error):
-                    self.isConnected = false
-                    self.lastErrorMessage = error.localizedDescription
-                    self.onAccessChanged?(false)
-                    completion?(false)
+        if #available(macOS 14.0, *) {
+            eventStore.requestFullAccessToEvents { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    self?.finishAccessRequest(granted: granted, error: error, completion: completion)
+                }
+            }
+        } else {
+            eventStore.requestAccess(to: .event) { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    self?.finishAccessRequest(granted: granted, error: error, completion: completion)
                 }
             }
         }
     }
 
-    func disconnect(clearCredentials: Bool = false) {
-        if clearCredentials {
-            GoogleOAuth.shared.signOutCompletely()
-        } else {
-            GoogleOAuth.shared.signOut()
-        }
-        isConnected = false
+    func disconnect() {
+        hasAccess = false
         lastErrorMessage = nil
         stop()
         onAccessChanged?(false)
     }
 
-    func saveCredentials(clientID: String, clientSecret: String) {
-        GoogleOAuth.shared.saveClientCredentials(clientID: clientID, clientSecret: clientSecret)
-        lastErrorMessage = nil
+    private func finishAccessRequest(granted: Bool, error: Error?, completion: ((Bool) -> Void)?) {
+        isRequestingAccess = false
+        if let error {
+            lastErrorMessage = error.localizedDescription
+        }
+        hasAccess = granted && Self.hasCalendarAccess
+        if hasAccess {
+            lastErrorMessage = nil
+            startPolling()
+        } else if lastErrorMessage == nil {
+            lastErrorMessage = "Calendar access was not granted."
+        }
+        onAccessChanged?(hasAccess)
+        completion?(hasAccess)
     }
 
     private func startPolling() {
@@ -122,93 +115,30 @@ final class CalendarAlertManager {
     }
 
     private func checkUpcomingEvents() {
-        guard GoogleOAuth.shared.isConnected else { return }
-
-        GoogleOAuth.shared.validAccessToken { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .failure(let error):
-                self.isConnected = false
-                self.lastErrorMessage = error.localizedDescription
-                self.onAccessChanged?(false)
-                self.stop()
-            case .success(let token):
-                self.fetchEvents(accessToken: token)
-            }
+        guard hasAccess, Self.hasCalendarAccess else {
+            hasAccess = false
+            onAccessChanged?(false)
+            stop()
+            return
         }
-    }
 
-    private func fetchEvents(accessToken: String) {
         let now = Date()
         guard let horizon = Calendar.current.date(byAdding: .hour, value: 24, to: now) else { return }
 
-        var components = URLComponents(string: GoogleCalendarConfig.eventsEndpoint)!
-        components.queryItems = [
-            URLQueryItem(name: "timeMin", value: iso8601String(now)),
-            URLQueryItem(name: "timeMax", value: iso8601String(horizon)),
-            URLQueryItem(name: "singleEvents", value: "true"),
-            URLQueryItem(name: "orderBy", value: "startTime"),
-            URLQueryItem(name: "maxResults", value: "50"),
-        ]
-
-        guard let url = components.url else { return }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
-            guard let self else { return }
-            if let error {
-                DispatchQueue.main.async {
-                    self.lastErrorMessage = error.localizedDescription
-                }
-                return
-            }
-            guard let data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-
-            if let apiError = json["error"] as? [String: Any],
-               let message = apiError["message"] as? String {
-                DispatchQueue.main.async {
-                    self.lastErrorMessage = message
-                    if (apiError["code"] as? Int) == 401 {
-                        self.isConnected = false
-                        self.onAccessChanged?(false)
-                        self.stop()
-                    }
-                }
-                return
-            }
-
-            let events = self.parseEvents(from: json)
-            DispatchQueue.main.async {
-                self.lastErrorMessage = nil
-                self.process(events: events, relativeTo: now)
-            }
-        }.resume()
-    }
-
-    private func parseEvents(from json: [String: Any]) -> [GoogleCalendarEvent] {
-        guard let items = json["items"] as? [[String: Any]] else { return [] }
-
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        let fallbackFormatter = ISO8601DateFormatter()
-        fallbackFormatter.formatOptions = [.withInternetDateTime]
-
-        return items.compactMap { item in
-            guard let id = item["id"] as? String else { return nil }
-            let title = (item["summary"] as? String ?? "Meeting").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let start = item["start"] as? [String: Any],
-                  let dateTime = start["dateTime"] as? String else { return nil }
-            let startDate = formatter.date(from: dateTime) ?? fallbackFormatter.date(from: dateTime)
-            guard let startDate else { return nil }
-            return GoogleCalendarEvent(id: id, title: title, startDate: startDate)
+        let calendars = eventStore.calendars(for: .event)
+        let predicate = eventStore.predicateForEvents(withStart: now, end: horizon, calendars: calendars)
+        let events = eventStore.events(matching: predicate).compactMap { event -> CalendarEvent? in
+            guard !event.isAllDay, let start = event.startDate else { return nil }
+            let title = (event.title ?? "Meeting").trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = event.eventIdentifier ?? UUID().uuidString
+            return CalendarEvent(id: id, title: title, startDate: start)
         }
+
+        lastErrorMessage = nil
+        process(events: events, relativeTo: now)
     }
 
-    private func process(events: [GoogleCalendarEvent], relativeTo now: Date) {
+    private func process(events: [CalendarEvent], relativeTo now: Date) {
         let lead = Self.leadMinutes * 60
         let window: TimeInterval = 90
 
@@ -232,9 +162,16 @@ final class CalendarAlertManager {
         alertedKeys = Set(alertedKeys.suffix(100))
     }
 
-    private func iso8601String(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: date)
+    private static var authorizationStatus: EKAuthorizationStatus {
+        EKEventStore.authorizationStatus(for: .event)
+    }
+
+    private static var hasCalendarAccess: Bool {
+        switch authorizationStatus {
+        case .fullAccess, .authorized:
+            return true
+        default:
+            return false
+        }
     }
 }

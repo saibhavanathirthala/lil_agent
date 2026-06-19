@@ -3,7 +3,7 @@ import AppKit
 final class ReminderView: NSView {
     var onAdd: ((ReminderKind, String, Date) -> Void)?
     var onDelete: ((UUID) -> Void)?
-    var onGrantCalendarAccess: ((String, String) -> Void)?
+    var onGrantCalendarAccess: (() -> Void)?
     var onDismissAlert: (() -> Void)?
 
     private let alertBanner = NSView()
@@ -17,14 +17,11 @@ final class ReminderView: NSView {
     private let timePicker = NSDatePicker()
     private let addButton = NSButton()
     private let calendarStatusLabel = NSTextField(wrappingLabelWithString: "")
-    private let clientIDField = NSTextField()
-    private let clientSecretField = NSSecureTextField()
     private let grantCalendarButton = NSButton()
     private let emptyLabel = NSTextField(labelWithString: "No reminders or schedulers yet")
     private var theme: PopoverTheme = PopoverTheme.current
     private var characterColor: NSColor = .gray
     private var showGrantButton = false
-    private var showCredentialFields = true
     private var showingAlert = false
     private var alertBlockHeight: CGFloat = 120
 
@@ -48,10 +45,6 @@ final class ReminderView: NSView {
         calendarStatusLabel.font = theme.font
         messageField.backgroundColor = theme.inputBg
         messageField.textColor = theme.textPrimary
-        clientIDField.backgroundColor = theme.inputBg
-        clientIDField.textColor = theme.textPrimary
-        clientSecretField.backgroundColor = theme.inputBg
-        clientSecretField.textColor = theme.textPrimary
         addButton.contentTintColor = characterColor
         grantCalendarButton.contentTintColor = characterColor
         gotItButton.contentTintColor = characterColor
@@ -83,20 +76,11 @@ final class ReminderView: NSView {
         needsLayout = true
     }
 
-    func updateCalendarStatus(message: String, isConnected: Bool, clientID: String = "", clientSecret: String = "") {
+    func updateCalendarStatus(message: String, isConnected: Bool) {
         calendarStatusLabel.stringValue = message
         showGrantButton = true
-        showCredentialFields = !isConnected
         grantCalendarButton.isHidden = false
-        grantCalendarButton.title = isConnected ? "Disconnect Google Calendar" : "Connect Google Calendar"
-        clientIDField.isHidden = isConnected
-        clientSecretField.isHidden = isConnected
-        if !clientID.isEmpty {
-            clientIDField.stringValue = clientID
-        }
-        if !clientSecret.isEmpty {
-            clientSecretField.stringValue = clientSecret
-        }
+        grantCalendarButton.title = isConnected ? "Disconnect Apple Calendar" : "Connect Apple Calendar"
         needsLayout = true
     }
 
@@ -150,19 +134,7 @@ final class ReminderView: NSView {
         calendarStatusLabel.maximumNumberOfLines = 4
         addSubview(calendarStatusLabel)
 
-        clientIDField.placeholderString = "Google OAuth Client ID"
-        clientIDField.isBordered = true
-        clientIDField.bezelStyle = .roundedBezel
-        clientIDField.font = theme.font
-        addSubview(clientIDField)
-
-        clientSecretField.placeholderString = "Google OAuth Client Secret"
-        clientSecretField.isBordered = true
-        clientSecretField.bezelStyle = .roundedBezel
-        clientSecretField.font = theme.font
-        addSubview(clientSecretField)
-
-        grantCalendarButton.title = "Connect Google Calendar"
+        grantCalendarButton.title = "Connect Apple Calendar"
         grantCalendarButton.bezelStyle = .rounded
         grantCalendarButton.target = self
         grantCalendarButton.action = #selector(grantCalendarTapped)
@@ -218,13 +190,7 @@ final class ReminderView: NSView {
         let pad: CGFloat = 12
         let inputH: CGFloat = 24
         let buttonH: CGFloat = 26
-        let calendarBlock: CGFloat = {
-            guard showGrantButton else { return 44 }
-            if showCredentialFields {
-                return 36 + 8 + 24 + 8 + 24 + 8 + 26
-            }
-            return 72
-        }()
+        let calendarBlock: CGFloat = showGrantButton ? 72 : 0
         let alertBlock: CGFloat = showingAlert ? alertBlockHeight : 0
         let schedulerDateRow: CGFloat = selectedKind == .scheduler ? inputH + 8 : 0
         let bottomBlock = calendarBlock + inputH + 8 + schedulerDateRow + inputH + 8 + buttonH + pad + alertBlock
@@ -251,22 +217,12 @@ final class ReminderView: NSView {
         let calendarTop = bounds.height - pad - calendarBlock - alertBlock
 
         calendarStatusLabel.frame = NSRect(
-            x: pad, y: calendarTop + (showCredentialFields ? 98 : 28),
-            width: bounds.width - pad * 2, height: showCredentialFields ? 36 : 36
+            x: pad, y: calendarTop + 34,
+            width: bounds.width - pad * 2, height: 36
         )
-        if showCredentialFields {
-            clientIDField.frame = NSRect(
-                x: pad, y: calendarTop + 66,
-                width: bounds.width - pad * 2, height: inputH
-            )
-            clientSecretField.frame = NSRect(
-                x: pad, y: calendarTop + 34,
-                width: bounds.width - pad * 2, height: inputH
-            )
-        }
         grantCalendarButton.frame = NSRect(
             x: pad, y: calendarTop,
-            width: min(200, bounds.width - pad * 2), height: buttonH
+            width: min(220, bounds.width - pad * 2), height: buttonH
         )
 
         scrollView.frame = NSRect(x: pad, y: bottomBlock, width: bounds.width - pad * 2, height: bounds.height - bottomBlock - pad)
@@ -416,7 +372,7 @@ final class ReminderView: NSView {
     }
 
     @objc private func grantCalendarTapped() {
-        onGrantCalendarAccess?(clientIDField.stringValue, clientSecretField.stringValue)
+        onGrantCalendarAccess?()
     }
 
     @objc private func gotItTapped() {
