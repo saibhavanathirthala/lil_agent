@@ -117,10 +117,7 @@ class WalkerCharacter {
             calendar.onAccessChanged = { [weak self] connected in
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    self.reminderView?.updateCalendarStatus(
-                        message: self.calendarAlertManager?.statusMessage ?? "",
-                        isConnected: connected
-                    )
+                    self.refreshCalendarUI(isConnected: connected)
                 }
             }
         }
@@ -128,6 +125,16 @@ class WalkerCharacter {
 
     private var calendarHasAccess: Bool {
         GoogleOAuth.shared.isConnected
+    }
+
+    private func refreshCalendarUI(isConnected: Bool? = nil) {
+        let connected = isConnected ?? calendarHasAccess
+        reminderView?.updateCalendarStatus(
+            message: calendarAlertManager?.statusMessage ?? "",
+            isConnected: connected,
+            clientID: GoogleOAuth.shared.storedClientID,
+            clientSecret: GoogleOAuth.shared.storedClientSecret
+        )
     }
 
     // MARK: - Setup
@@ -486,10 +493,7 @@ class WalkerCharacter {
             createReminderPopoverWindow()
         }
         reminderView?.reloadList(reminders: reminderManager?.reminders ?? [])
-        reminderView?.updateCalendarStatus(
-            message: calendarAlertManager?.statusMessage ?? "",
-            isConnected: calendarHasAccess
-        )
+        refreshCalendarUI()
 
         if let alertMessage {
             reminderView?.showActiveAlert(alertMessage)
@@ -759,20 +763,14 @@ class WalkerCharacter {
             self?.reminderManager?.remove(id: id)
             panel.reloadList(reminders: self?.reminderManager?.reminders ?? [])
         }
-        panel.onGrantCalendarAccess = { [weak self] in
+        panel.onGrantCalendarAccess = { [weak self] clientID, clientSecret in
             guard let self else { return }
             if self.calendarHasAccess {
                 self.calendarAlertManager?.disconnect()
-                self.reminderView?.updateCalendarStatus(
-                    message: self.calendarAlertManager?.statusMessage ?? "",
-                    isConnected: false
-                )
+                self.refreshCalendarUI(isConnected: false)
             } else {
-                self.calendarAlertManager?.requestAccess { _ in
-                    self.reminderView?.updateCalendarStatus(
-                        message: self.calendarAlertManager?.statusMessage ?? "",
-                        isConnected: self.calendarHasAccess
-                    )
+                self.calendarAlertManager?.requestAccess(clientID: clientID, clientSecret: clientSecret) { _ in
+                    self.refreshCalendarUI()
                 }
             }
         }
@@ -781,7 +779,9 @@ class WalkerCharacter {
         }
         panel.updateCalendarStatus(
             message: calendarAlertManager?.statusMessage ?? "",
-            isConnected: calendarHasAccess
+            isConnected: calendarHasAccess,
+            clientID: GoogleOAuth.shared.storedClientID,
+            clientSecret: GoogleOAuth.shared.storedClientSecret
         )
         container.addSubview(panel)
 

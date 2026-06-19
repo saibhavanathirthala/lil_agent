@@ -7,16 +7,16 @@ enum GoogleCalendarConfig {
     static let authEndpoint = "https://accounts.google.com/o/oauth2/v2/auth"
     static let tokenEndpoint = "https://oauth2.googleapis.com/token"
     static let eventsEndpoint = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
-    private static let secretsFileName = "GoogleOAuthSecrets"
+
+    private static let clientIDKey = "GoogleOAuthClientID"
+    private static let clientSecretKey = "GoogleOAuthClientSecret"
 
     static var clientID: String? {
-        bundledSecret(forKey: "GoogleOAuthClientID")
-            ?? infoPlistValue(forKey: "GoogleOAuthClientID")
+        storedValue(forKey: clientIDKey)
     }
 
     static var clientSecret: String? {
-        bundledSecret(forKey: "GoogleOAuthClientSecret")
-            ?? infoPlistValue(forKey: "GoogleOAuthClientSecret")
+        storedValue(forKey: clientSecretKey)
     }
 
     static var isConfigured: Bool {
@@ -24,22 +24,25 @@ enum GoogleCalendarConfig {
     }
 
     static var setupHint: String {
-        """
-        Copy GoogleOAuthSecrets.example.plist to GoogleOAuthSecrets.plist, \
-        add your Client ID and Secret, then rebuild.
-        """
+        "Paste your Google OAuth Client ID and Secret below, then connect."
     }
 
-    private static func bundledSecret(forKey key: String) -> String? {
-        guard let url = Bundle.main.url(forResource: secretsFileName, withExtension: "plist"),
-              let data = try? Data(contentsOf: url),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let raw = plist[key] as? String else { return nil }
-        return sanitized(raw)
+    static func saveCredentials(clientID: String, clientSecret: String) {
+        if let id = sanitized(clientID) {
+            UserDefaults.standard.set(id, forKey: clientIDKey)
+        }
+        if let secret = sanitized(clientSecret) {
+            UserDefaults.standard.set(secret, forKey: clientSecretKey)
+        }
     }
 
-    private static func infoPlistValue(forKey key: String) -> String? {
-        guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return nil }
+    static func clearCredentials() {
+        UserDefaults.standard.removeObject(forKey: clientIDKey)
+        UserDefaults.standard.removeObject(forKey: clientSecretKey)
+    }
+
+    private static func storedValue(forKey key: String) -> String? {
+        guard let raw = UserDefaults.standard.string(forKey: key) else { return nil }
         return sanitized(raw)
     }
 
@@ -65,10 +68,27 @@ final class GoogleOAuth {
         refreshToken() != nil || validAccessToken() != nil
     }
 
+    var storedClientID: String {
+        GoogleCalendarConfig.clientID ?? ""
+    }
+
+    var storedClientSecret: String {
+        GoogleCalendarConfig.clientSecret ?? ""
+    }
+
+    func saveClientCredentials(clientID: String, clientSecret: String) {
+        GoogleCalendarConfig.saveCredentials(clientID: clientID, clientSecret: clientSecret)
+    }
+
     func signOut() {
         deleteToken(accessTokenKey)
         deleteToken(refreshTokenKey)
         deleteToken(expiryKey)
+    }
+
+    func signOutCompletely() {
+        signOut()
+        GoogleCalendarConfig.clearCredentials()
     }
 
     private var pendingCompletion: ((Result<Void, Error>) -> Void)?
@@ -174,7 +194,7 @@ final class GoogleOAuth {
     }
 
     private func exchangeCodeForTokens(code: String, redirectURI: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let clientID = GoogleCalendarConfig.clientID else {
+        guard GoogleCalendarConfig.clientID != nil else {
             completion(.failure(GoogleOAuthError.notConfigured))
             return
         }
@@ -319,11 +339,12 @@ enum GoogleOAuthError: LocalizedError {
     case authInProgress
     case authTimeout
     case browserOpenFailed
+    case missingCredentials
 
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "Google OAuth client ID is not configured."
+            return "Add your Google OAuth Client ID and Secret first."
         case .notConnected:
             return "Google Calendar is not connected."
         case .invalidURL:
@@ -342,6 +363,8 @@ enum GoogleOAuthError: LocalizedError {
             return "Google sign-in timed out. Click Connect Google Calendar to try again."
         case .browserOpenFailed:
             return "Could not open your browser for Google sign-in."
+        case .missingCredentials:
+            return "Enter your Google OAuth Client ID and Secret."
         }
     }
 }

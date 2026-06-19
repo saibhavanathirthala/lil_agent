@@ -50,7 +50,20 @@ final class CalendarAlertManager {
         pollTimer = nil
     }
 
-    func requestAccess(completion: ((Bool) -> Void)? = nil) {
+    func requestAccess(clientID: String, clientSecret: String, completion: ((Bool) -> Void)? = nil) {
+        let trimmedID = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSecret = clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedSecret = trimmedSecret.isEmpty ? GoogleOAuth.shared.storedClientSecret : trimmedSecret
+
+        guard !trimmedID.isEmpty, !resolvedSecret.isEmpty else {
+            lastErrorMessage = GoogleOAuthError.missingCredentials.localizedDescription
+            onAccessChanged?(false)
+            completion?(false)
+            return
+        }
+
+        saveCredentials(clientID: trimmedID, clientSecret: resolvedSecret)
+
         guard GoogleOAuth.shared.isConfigured else {
             lastErrorMessage = GoogleCalendarConfig.setupHint
             onAccessChanged?(false)
@@ -83,12 +96,21 @@ final class CalendarAlertManager {
         }
     }
 
-    func disconnect() {
-        GoogleOAuth.shared.signOut()
+    func disconnect(clearCredentials: Bool = false) {
+        if clearCredentials {
+            GoogleOAuth.shared.signOutCompletely()
+        } else {
+            GoogleOAuth.shared.signOut()
+        }
         isConnected = false
         lastErrorMessage = nil
         stop()
         onAccessChanged?(false)
+    }
+
+    func saveCredentials(clientID: String, clientSecret: String) {
+        GoogleOAuth.shared.saveClientCredentials(clientID: clientID, clientSecret: clientSecret)
+        lastErrorMessage = nil
     }
 
     private func startPolling() {

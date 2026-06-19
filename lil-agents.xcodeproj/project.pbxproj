@@ -30,7 +30,6 @@
 		A10000010000000000000043 /* AlertSound.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000042 /* AlertSound.swift */; };
 		A10000010000000000000044 /* GoogleOAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000043 /* GoogleOAuth.swift */; };
 		A10000010000000000000045 /* GoogleOAuthLoopbackServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000044 /* GoogleOAuthLoopbackServer.swift */; };
-		A10000010000000000000046 /* GoogleOAuthSecrets.plist in Resources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000045 /* GoogleOAuthSecrets.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -58,8 +57,6 @@
 		A10000020000000000000042 /* AlertSound.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertSound.swift; sourceTree = "<group>"; };
 		A10000020000000000000043 /* GoogleOAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuth.swift; sourceTree = "<group>"; };
 		A10000020000000000000044 /* GoogleOAuthLoopbackServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuthLoopbackServer.swift; sourceTree = "<group>"; };
-		A10000020000000000000045 /* GoogleOAuthSecrets.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = GoogleOAuthSecrets.plist; sourceTree = "<group>"; };
-		A10000020000000000000046 /* GoogleOAuthSecrets.example.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = GoogleOAuthSecrets.example.plist; sourceTree = "<group>"; };
 		A10000030000000000000001 /* lil agents.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "lil agents.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -101,8 +98,6 @@
 				A10000020000000000000042 /* AlertSound.swift */,
 				A10000020000000000000043 /* GoogleOAuth.swift */,
 				A10000020000000000000044 /* GoogleOAuthLoopbackServer.swift */,
-				A10000020000000000000045 /* GoogleOAuthSecrets.plist */,
-				A10000020000000000000046 /* GoogleOAuthSecrets.example.plist */,
 				A10000020000000000000023 /* TerminalView.swift */,
 				A10000020000000000000024 /* WalkerCharacter.swift */,
 				A10000020000000000000025 /* LilAgentsController.swift */,
@@ -192,7 +187,6 @@
 				A10000010000000000000003 /* walk-jazz-01.mov in Resources */,
 				A10000010000000000000005 /* Assets.xcassets in Resources */,
 				A10000010000000000000010 /* Sounds in Resources */,
-				A10000010000000000000046 /* GoogleOAuthSecrets.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
